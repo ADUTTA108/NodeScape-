@@ -1,0 +1,397 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Graph Traversal Visualization</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .container {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+        .controls {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+        button {
+            padding: 8px 16px;
+            cursor: pointer;
+        }
+        #graph-container {
+            width: 100%;
+            height: 400px;
+            border: 1px solid #ccc;
+            position: relative;
+        }
+        .node {
+            position: absolute;
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background-color: #4CAF50;
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: background-color 0.3s;
+            user-select: none;
+        }
+        .node.visited {
+            background-color: #f44336;
+        }
+        .node.current {
+            background-color: #FFA500;
+        }
+        .edge {
+            position: absolute;
+            height: 2px;
+            background-color: #333;
+            transform-origin: 0 0;
+            z-index: -1;
+        }
+        textarea {
+            width: 100%;
+            height: 100px;
+        }
+        .edge-creation {
+            background-color: #2196F3;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Graph Traversal Visualization</h1>
+        
+        <div class="controls">
+            <button id="add-node">Add Node</button>
+            <button id="add-edge">Add Edge</button>
+            <button id="clear">Clear Graph</button>
+            <button id="bfs">Run BFS</button>
+            <button id="dfs">Run DFS</button>
+            <select id="start-node">
+                <option value="">Select start node</option>
+            </select>
+            <button id="reset">Reset Colors</button>
+        </div>
+        
+        <div id="graph-container"></div>
+        
+        <div>
+            <h3>Adjacency List</h3>
+            <textarea id="adjacency-list" readonly></textarea>
+        </div>
+    </div>
+
+    <script>
+        const graphContainer = document.getElementById('graph-container');
+        const addNodeBtn = document.getElementById('add-node');
+        const addEdgeBtn = document.getElementById('add-edge');
+        const clearBtn = document.getElementById('clear');
+        const bfsBtn = document.getElementById('bfs');
+        const dfsBtn = document.getElementById('dfs');
+        const startNodeSelect = document.getElementById('start-node');
+        const resetBtn = document.getElementById('reset');
+        const adjacencyListTextarea = document.getElementById('adjacency-list');
+        
+        let nodes = [];
+        let edges = [];
+        let adjacencyList = {};
+        let nodeCounter = 1;
+        let isRunning = false;
+        let isAddingEdge = false;
+        let edgeStartNode = null;
+        
+        // Add node to graph
+        addNodeBtn.addEventListener('click', () => {
+            if (isRunning) return;
+            
+            const nodeId = `N${nodeCounter++}`;
+            const node = document.createElement('div');
+            node.className = 'node';
+            node.id = nodeId;
+            node.textContent = nodeId;
+            
+            // Random position within container
+            const containerWidth = graphContainer.clientWidth - 40;
+            const containerHeight = graphContainer.clientHeight - 40;
+            const left = 20 + Math.random() * containerWidth;
+            const top = 20 + Math.random() * containerHeight;
+            
+            node.style.left = `${left}px`;
+            node.style.top = `${top}px`;
+            
+            // Make node draggable
+            makeDraggable(node);
+            
+            graphContainer.appendChild(node);
+            nodes.push(node);
+            adjacencyList[nodeId] = [];
+            updateAdjacencyList();
+            updateStartNodeSelect();
+        });
+        
+        // Toggle edge creation mode
+        addEdgeBtn.addEventListener('click', () => {
+            if (isRunning) return;
+            isAddingEdge = !isAddingEdge;
+            addEdgeBtn.classList.toggle('edge-creation', isAddingEdge);
+            
+            if (isAddingEdge) {
+                nodes.forEach(node => node.style.cursor = 'crosshair');
+            } else {
+                nodes.forEach(node => node.style.cursor = 'pointer');
+                if (edgeStartNode) {
+                    edgeStartNode.style.boxShadow = '';
+                    edgeStartNode = null;
+                }
+            }
+        });
+        
+        // Make nodes draggable
+        function makeDraggable(node) {
+            let isDragging = false;
+            let offsetX, offsetY;
+            
+            node.addEventListener('mousedown', (e) => {
+                if (isRunning) return;
+                
+                if (isAddingEdge) {
+                    if (!edgeStartNode) {
+                        // First node selected for edge
+                        edgeStartNode = node;
+                        node.style.boxShadow = '0 0 0 3px #2196F3';
+                    } else if (node !== edgeStartNode) {
+                        // Second node selected - create edge
+                        if (!adjacencyList[edgeStartNode.id].includes(node.id)) {
+                            createEdge(edgeStartNode, node);
+                            adjacencyList[edgeStartNode.id].push(node.id);
+                            adjacencyList[node.id].push(edgeStartNode.id);
+                            updateAdjacencyList();
+                        }
+                        edgeStartNode.style.boxShadow = '';
+                        edgeStartNode = null;
+                    }
+                    e.stopPropagation();
+                    return;
+                }
+                
+                isDragging = true;
+                offsetX = e.clientX - node.getBoundingClientRect().left;
+                offsetY = e.clientY - node.getBoundingClientRect().top;
+                node.style.cursor = 'grabbing';
+                e.preventDefault();
+            });
+            
+            document.addEventListener('mousemove', (e) => {
+                if (!isDragging || isRunning) return;
+                
+                const containerRect = graphContainer.getBoundingClientRect();
+                let left = e.clientX - containerRect.left - offsetX;
+                let top = e.clientY - containerRect.top - offsetY;
+                
+                // Keep node within container bounds
+                left = Math.max(0, Math.min(left, containerRect.width - node.offsetWidth));
+                top = Math.max(0, Math.min(top, containerRect.height - node.offsetHeight));
+                
+                node.style.left = `${left}px`;
+                node.style.top = `${top}px`;
+                
+                // Update edge positions
+                updateEdgePositions(node.id);
+            });
+            
+            document.addEventListener('mouseup', () => {
+                isDragging = false;
+                if (!isAddingEdge) {
+                    node.style.cursor = 'pointer';
+                }
+            });
+        }
+        
+        // Create edge between two nodes
+        function createEdge(node1, node2) {
+            const edge = document.createElement('div');
+            edge.className = 'edge';
+            edge.setAttribute('data-nodes', `${node1.id}-${node2.id}`);
+            edges.push(edge);
+            updateEdgePosition(node1, node2, edge);
+            graphContainer.appendChild(edge);
+        }
+        
+        // Update position of a single edge
+        function updateEdgePosition(node1, node2, edge) {
+            const rect1 = node1.getBoundingClientRect();
+            const rect2 = node2.getBoundingClientRect();
+            const containerRect = graphContainer.getBoundingClientRect();
+            
+            const x1 = rect1.left + rect1.width/2 - containerRect.left;
+            const y1 = rect1.top + rect1.height/2 - containerRect.top;
+            const x2 = rect2.left + rect2.width/2 - containerRect.left;
+            const y2 = rect2.top + rect2.height/2 - containerRect.top;
+            
+            const length = Math.sqrt(Math.pow(x2 - x1, 2) + Math.pow(y2 - y1, 2));
+            const angle = Math.atan2(y2 - y1, x2 - x1) * 180 / Math.PI;
+            
+            edge.style.width = `${length}px`;
+            edge.style.left = `${x1}px`;
+            edge.style.top = `${y1}px`;
+            edge.style.transform = `rotate(${angle}deg)`;
+        }
+        
+        // Update positions of all edges connected to a node
+        function updateEdgePositions(nodeId) {
+            edges.forEach(edge => {
+                const connectedNodes = edge.getAttribute('data-nodes');
+                if (connectedNodes && connectedNodes.includes(nodeId)) {
+                    const [id1, id2] = connectedNodes.split('-');
+                    const node1 = document.getElementById(id1);
+                    const node2 = document.getElementById(id2);
+                    updateEdgePosition(node1, node2, edge);
+                }
+            });
+        }
+        
+        // Clear the graph
+        clearBtn.addEventListener('click', () => {
+            if (isRunning) return;
+            
+            graphContainer.innerHTML = '';
+            nodes = [];
+            edges = [];
+            adjacencyList = {};
+            nodeCounter = 1;
+            isAddingEdge = false;
+            edgeStartNode = null;
+            addEdgeBtn.classList.remove('edge-creation');
+            updateAdjacencyList();
+            updateStartNodeSelect();
+        });
+        
+        // Reset node colors
+        resetBtn.addEventListener('click', () => {
+            if (isRunning) return;
+            
+            nodes.forEach(node => {
+                node.classList.remove('visited', 'current');
+            });
+        });
+        
+        // Update adjacency list display
+        function updateAdjacencyList() {
+            let text = '';
+            for (const node in adjacencyList) {
+                text += `${node}: ${adjacencyList[node].join(', ')}\n`;
+            }
+            adjacencyListTextarea.value = text;
+        }
+        
+        // Update start node select options
+        function updateStartNodeSelect() {
+            startNodeSelect.innerHTML = '<option value="">Select start node</option>';
+            nodes.forEach(node => {
+                const option = document.createElement('option');
+                option.value = node.id;
+                option.textContent = node.id;
+                startNodeSelect.appendChild(option);
+            });
+        }
+        
+        // Run BFS
+        bfsBtn.addEventListener('click', async () => {
+            if (isRunning || !startNodeSelect.value) return;
+            
+            isRunning = true;
+            isAddingEdge = false;
+            addEdgeBtn.classList.remove('edge-creation');
+            if (edgeStartNode) {
+                edgeStartNode.style.boxShadow = '';
+                edgeStartNode = null;
+            }
+            
+            const startNodeId = startNodeSelect.value;
+            await traverseGraph(startNodeId, 'bfs');
+            isRunning = false;
+        });
+        
+        // Run DFS
+        dfsBtn.addEventListener('click', async () => {
+            if (isRunning || !startNodeSelect.value) return;
+            
+            isRunning = true;
+            isAddingEdge = false;
+            addEdgeBtn.classList.remove('edge-creation');
+            if (edgeStartNode) {
+                edgeStartNode.style.boxShadow = '';
+                edgeStartNode = null;
+            }
+            
+            const startNodeId = startNodeSelect.value;
+            await traverseGraph(startNodeId, 'dfs');
+            isRunning = false;
+        });
+        
+        // Graph traversal function
+        async function traverseGraph(startNodeId, method) {
+            // Reset colors
+            nodes.forEach(node => {
+                node.classList.remove('visited', 'current');
+            });
+            
+            const visited = new Set();
+            const queueOrStack = [startNodeId];
+            visited.add(startNodeId);
+            
+            // Highlight start node
+            const startNode = document.getElementById(startNodeId);
+            startNode.classList.add('current');
+            await sleep(500);
+            
+            while (queueOrStack.length > 0) {
+                const currentNodeId = method === 'bfs' ? queueOrStack.shift() : queueOrStack.pop();
+                const currentNode = document.getElementById(currentNodeId);
+                
+                // Mark as visited (but not current)
+                currentNode.classList.remove('current');
+                currentNode.classList.add('visited');
+                
+                // Process neighbors
+                for (const neighborId of adjacencyList[currentNodeId]) {
+                    if (!visited.has(neighborId)) {
+                        visited.add(neighborId);
+                        queueOrStack.push(neighborId);
+                        
+                        // Highlight neighbor as current
+                        const neighborNode = document.getElementById(neighborId);
+                        neighborNode.classList.add('current');
+                        await sleep(500);
+                        
+                        // Mark as visited (but keep current if it's being processed)
+                        if (method === 'dfs') {
+                            neighborNode.classList.add('visited');
+                        }
+                    }
+                }
+                
+                // If BFS, mark as visited after processing neighbors
+                if (method === 'bfs') {
+                    currentNode.classList.add('visited');
+                }
+            }
+        }
+        
+        // Helper function for animation delay
+        function sleep(ms) {
+            return new Promise(resolve => setTimeout(resolve, ms));
+        }
+    </script>
+</body>
+</html>
